@@ -4,81 +4,83 @@ Guidance for agents working in this repository.
 
 ## Project overview
 
-**brewcolator** is a client-side React + TypeScript single-page app built with Vite. It is currently the fresh Vite/React scaffold: there is no product logic yet, only the template landing page in `src/App.tsx` and the Vite starter styles. Treat this as a greenfield app; assume features are added from scratch.
+**brewcolator** is a client-side homebrew fermentation calculator built with React 19, TypeScript ~6.0, Vite 8, and Mantine v7. It is hosted at `https://brewcolator.rewdy.lol`.
 
-- React 19, TypeScript ~6.0, Vite 8, Oxlint 1.x.
-- Package manager is **Bun** (`bun.lock` is committed; there is no `package-lock.json`/`yarn.lock`). Use `bun`/`bunx`, not npm/yarn.
-- No test runner, no CI config, and no formatter are configured. Do not add them unless asked.
+It focuses on wine, mead, cider, and high-sugar homebrew ferments, providing two main modes:
+1. **Outcome Forecaster (`/predict`)**: Computes predicted final gravity (FG), expected ABV %, and fermentation character (Dry vs. Sweet / Incomplete) based on batch size, starting original gravity (OG), yeast alcohol tolerance (% ABV), and a customizable baseline dry FG (default 0.998). Displays warnings if yeast alcohol limits cause early stalls.
+2. **Chaptalization & ABV Targeter (`/boost`)**: Computes required target original gravity and addition weight of a selectable fermentable (Table Sugar, Corn Sugar, Honey, Maple Syrup, Brown Sugar, DME, or custom PPG) to achieve a target ABV from current starting gravity and batch size. Displays feasibility warnings if target ABV exceeds yeast tolerance.
+
+- **Design System**: Swiss typography-inspired, Mobbin-style high-contrast layout using `@mantine/core` v7 with an 18px base typography scale (`md: '1.125rem'`), tabular numbers, and full light/dark color scheme toggle.
+- **Icon Pack**: `lucide-react`.
+- **Routing**: Client-side routing via `wouter` (`/predict`, `/boost`, redirect from `/`).
+- **State & Persistence**: `jotai` with `atomWithStorage` for user preferences (US $\leftrightarrow$ Metric unit toggle and default baseline dry FG) stored in `localStorage`.
+- **Package Manager**: **Bun** (`bun.lock` is committed). Always use `bun`/`bunx`, not npm/yarn/pnpm.
+- **Unit Testing**: `bun test` runs native Bun tests (`src/lib/brewing-math.test.ts`).
 
 ## Commands
 
 Run from the repo root:
 
 ```bash
-bun install          # install deps (use bun, not npm)
+bun install          # install dependencies (use bun, not npm)
 bun run dev          # Vite dev server with HMR (default port 5173)
-bun run build        # tsc -b && vite build  → type-check then bundle to dist/
+bun test             # run unit test suite using Bun test runner
+bun run build        # tsc -b && vite build -> type-check then bundle to dist/
 bun run lint         # oxlint
 bun run preview      # serve the production build from dist/
 ```
 
-`build` runs `tsc -b` first, so type errors fail the build. Use `bun run build` as the type-check command; there is no standalone `typecheck` script.
+`build` runs `tsc -b` first, so TypeScript errors fail the build. Use `bun run build` as the compiler check; there is no standalone `typecheck` script.
 
 ## Structure and architecture
 
 ```
-index.html          # single HTML entry; mounts <div id="root"> and /src/main.tsx
-src/main.tsx        # createRoot + StrictMode, imports index.css and App
-src/App.tsx         # root component (currently the template page)
-src/index.css       # global styles + CSS custom properties (theme) + dark mode
-src/App.css         # component styles, co-located with App.tsx
-src/assets/         # bundled images/SVGs imported by components
-public/             # static files served as-is (favicon.svg, icons.svg)
-openspec/           # OpenSpec spec-driven planning artifacts (see below)
+index.html                     # single HTML entry; mounts <div id="root"> and /src/main.tsx
+src/main.tsx                   # ColorSchemeScript, MantineProvider, imports styles
+src/App.tsx                    # Root app layout: Header, Wouter Switch/Routes, Footer
+src/theme.ts                   # Mantine theme configuration (18px base md, system sans font stack, xs radius)
+src/index.css                  # Mantine styles import (@mantine/core/styles.css) and root layout rules
+src/components/
+  Header.tsx                   # Centered brand title with wine icon, route tabs, unit toggle, dark mode toggle
+src/views/
+  PredictView.tsx              # /predict view: Batch parameters & outcome prediction cards
+  BoostView.tsx                # /boost view: Chaptalization inputs & sugar addition results
+src/lib/
+  brewing-math.ts              # Pure brewing calculation functions, unit conversions, and fermentable database
+  brewing-math.test.ts         # Unit tests covering fermentation forecasting and chaptalization formulas
+src/state/
+  atoms.ts                     # Jotai atoms with localStorage persistence (unitSystemAtom, defaultDryFgAtom)
+openspec/
+  specs/                       # Durable specifications (brewing-calculator capability)
+  changes/archive/             # Archived OpenSpec changes
+  config.yaml                  # OpenSpec configuration
 ```
 
-Data/control flow is the standard Vite SPA model: `index.html` → `src/main.tsx` → `App` → child components. Styles are plain CSS files imported from components; assets under `src/assets` are imported as modules so Vite fingerprints them.
+## Calculation & domain logic
+
+All brewing math is isolated in `src/lib/brewing-math.ts`:
+- **Potential ABV**: $(\text{OG} - \text{Dry FG}) \times 131.25$
+- **Stalled FG**: $\text{OG} - \left(\frac{\text{Tolerance}}{131.25}\right)$
+- **Target OG**: $\text{Dry FG} + \left(\frac{\text{Target ABV}}{131.25}\right)$
+- **Points Deficit**: $(\text{Target OG} - \text{Current OG}) \times 1000 \times \text{Volume in Gal}$
+- **Sugar Weight (lbs)**: $\frac{\text{Total Points}}{\text{PPG}}$
+- **Units**: US (Gallons, lbs, oz) and Metric (Liters, kg, g). 1 Gallon = 3.78541 Liters; 1 lb = 453.59237 g.
+- **Displacement Disclaimer**: UI explicitly notes that entered batch size is treated as final liquid volume without modeling sugar displacement.
 
 ## Code conventions
 
-- **TypeScript is strict about syntax semantics.** `tsconfig.app.json` sets `verbatimModuleSyntax: true` and `erasableSyntaxOnly: true`. Consequences:
-  - Use `import type { X } from '...'` for type-only imports; a plain import of a type is an error.
-  - Enums, parameter properties, and namespaces are disallowed (they are not erasable). Use `const` objects / union types instead.
-  - `noUnusedLocals` and `noUnusedParameters` are on; unused vars fail the build.
-- **Project references:** `tsconfig.json` only references `tsconfig.app.json` (src) and `tsconfig.node.json` (vite config). `tsc -b` compiles both. New root-level Node/tooling files need to be added to `tsconfig.node.json`'s `include`; new app source under `src/` is picked up automatically.
-- **CSS:** styles use native CSS nesting (e.g. `&:hover`, nested selectors), not Sass/Less. There is no CSS preprocessor. Theme colors/spacing are CSS custom properties defined in `src/index.css` under `:root`, with a dark-mode override via `@media (prefers-color-scheme: dark)`. Reuse these variables (`--accent`, `--border`, `--text`, etc.) rather than hard-coding colors.
-- Components are function components using hooks (`useState`); follow the existing pattern and keep styles in a co-located `*.css` file.
-- `src/main.tsx` uses `StrictMode`, so effects run twice in dev - keep side effects idempotent.
-
-## Linting
-
-`oxlint` is configured in `.oxlintrc.json` with the `react`, `typescript`, and `oxc` plugins. Notably `react/rules-of-hooks` is an **error** and `react/only-export-components` is a warning (constant exports allowed). Type-aware rules are **not** enabled (that requires the optional `oxlint-tsgolint` package, which is not installed). Run `bun run lint` before finishing changes.
+- **TypeScript strictness**: `tsconfig.app.json` has `verbatimModuleSyntax: true` and `erasableSyntaxOnly: true`.
+  - Always use `import type { ... }` for type-only imports; plain import of types is a compile error.
+  - No enums, namespaces, or constructor parameter properties (non-erasable syntax). Use `as const` objects and union types instead.
+  - `noUnusedLocals` and `noUnusedParameters` are enabled.
+  - Types in `tsconfig.app.json` include `"@types/bun"` to support `bun:test` declarations.
+- **CSS & Theming**: Styling is driven by `@mantine/core` theme and component props (`variant="default"`, `radius="xs"`, `fw={800}`, etc.). Avoid writing custom CSS files; leverage Mantine's CSS variables and layout components (`Stack`, `Group`, `Grid`, `Card`, `Box`).
+- **Equal-height columns pattern**: On grid layouts, use `<Grid align="stretch">` and apply `style={{ height: '100%' }}` on child cards/stacks so left and right columns visually align.
+- **Linting**: Oxlint is configured in `.oxlintrc.json`. Run `bun run lint` before committing.
 
 ## OpenSpec (spec-driven workflow)
 
-This repo uses [OpenSpec](https://openspec.dev) for planning. The `openspec` CLI is available on PATH.
-
-- `openspec/config.yaml` sets `schema: spec-driven` (currently with no custom context/rules).
-- Durable specs live in `openspec/specs/`; work-in-flight changes live in `openspec/changes/` (completed ones move to `openspec/changes/archive/`). Both are empty scaffolding right now.
-- Prefer the OpenSpec workflow for non-trivial features rather than editing code directly: propose a change, review the generated artifacts (`proposal.md`, `specs/<capability>/spec.md`, `design.md`, `tasks.md`), then apply.
-- **Never hand-create a directory under `openspec/changes/`.** Use `openspec new change "<kebab-name>"` so required metadata (`.openspec.yaml`) is scaffolded correctly.
-- Explore mode must not implement code - it captures thinking into change artifacts only.
-
-### Slash commands and skills
-
-Workflow commands and matching skills are installed in both `.crush/` and `.agents/skills/` (regenerated by OpenSpec; avoid editing them by hand):
-
-- `/opsx:explore` (`openspec-explore`) - think through ideas, no implementation.
-- `/opsx:propose` (`openspec-propose`) - create a change with all planning artifacts.
-- `/opsx:apply` (`openspec-apply-change`) - implement tasks from a change.
-- `/opsx:update` (`openspec-update-change`) - revise an existing change's artifacts.
-- `/opsx:sync` (`openspec-sync-specs`) - push delta specs into main specs without archiving.
-- `/opsx:archive` (`openspec-archive-change`) - archive a completed change.
-
-The full CLI contract lives in those SKILL.md files. When in doubt, read the relevant skill before running OpenSpec commands.
-
-## Gotchas
-
-- Don't `cd` into subdirs to run scripts; the scripts are defined at the root and Vite resolves `index.html` from the root.
-- `dist/` and `node_modules/` are gitignored; never commit build output.
-- `.crush/` and `.agents/` contain agent tooling/state, not app code.
+This project uses [OpenSpec](https://openspec.dev) for change planning:
+- Durable capabilities live in `openspec/specs/` (e.g. `openspec/specs/brewing-calculator/spec.md`).
+- To propose new features or modifications: `/opsx:propose <name>`, review artifacts, apply with `/opsx:apply`, and archive with `/opsx:archive`.
+- Never manually create directories in `openspec/changes/`; use `openspec new change "<name>"`.
